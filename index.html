@@ -9,7 +9,11 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="溫濕度">
-    <link rel="apple-touch-icon" href="icon.png"> <style>
+    <link rel="apple-touch-icon" href="icon.png">
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: #f4f4f7;
@@ -18,40 +22,51 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
             min-height: 100vh;
         }
         .card {
             background: white;
             border-radius: 20px;
-            padding: 30px;
+            padding: 25px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.05);
             width: 100%;
             max-width: 350px;
             text-align: center;
             margin-bottom: 20px;
+            box-sizing: border-box;
+        }
+        .current-data {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 10px;
         }
         .value-box {
-            margin: 20px 0;
+            text-align: center;
         }
         .label {
-            font-size: 16px;
+            font-size: 14px;
             color: #666;
             margin-bottom: 5px;
         }
         .value {
-            font-size: 48px;
+            font-size: 32px;
             font-weight: bold;
             color: #1c1c1e;
         }
         .unit {
-            font-size: 20px;
+            font-size: 16px;
             color: #888;
         }
         .time {
             font-size: 12px;
             color: #999;
-            margin-top: 15px;
+            margin-top: 10px;
+        }
+        .chart-container {
+            position: relative;
+            height: 250px; 
+            width: 100%;
+            margin-top: 20px;
         }
         button {
             background-color: #007aff;
@@ -74,19 +89,24 @@
 <body>
 
     <div class="card">
-        <div class="value-box">
-            <div class="label">目前溫度</div>
-            <span class="value" id="temp">--</span><span class="unit"> °C</span>
-        </div>
-        <hr style="border:0; border-top: 1px solid #eee; margin: 20px 0;">
-        <div class="value-box">
-            <div class="label">目前濕度</div>
-            <span class="value" id="hum">--</span><span class="unit"> %</span>
+        <div class="current-data">
+            <div class="value-box">
+                <div class="label">目前溫度</div>
+                <span class="value" id="temp">--</span><span class="unit"> °C</span>
+            </div>
+            <div class="value-box">
+                <div class="label">目前濕度</div>
+                <span class="value" id="hum">--</span><span class="unit"> %</span>
+            </div>
         </div>
         <div class="time" id="update-time">最後更新：讀取中...</div>
+        
+        <div class="chart-container">
+            <canvas id="historyChart"></canvas>
+        </div>
     </div>
 
-    <button onclick="fetchData()">重新整理</button>
+    <button onclick="fetchData()">重新整理最新數據</button>
 
     <script>
         // ---------------- 填寫您的 ThingSpeak 參數 ----------------
@@ -94,43 +114,127 @@
         const readAPIKey = '4SWK1WXMMR02TUZF'; 
         // ---------------------------------------------------------
 
+        // 宣告全域變數來儲存圖表實例，避免重複渲染導致效能問題或閃爍
+        let myChart = null;
+
         async function fetchData() {
             const tempEl = document.getElementById('temp');
             const humEl = document.getElementById('hum');
             const timeEl = document.getElementById('update-time');
 
-            tempEl.innerText = '..';
-            humEl.innerText = '..';
             timeEl.innerText = '讀取資料中...';
 
-            // 呼叫 Read API，設定 results=1 只取最新一筆數據
-            const url = `https://api.thingspeak.com/channels/${channelID}/feeds.json?api_key=${readAPIKey}&results=1`;
+            // 修改點：將 results=1 改為 results=30 (取得近 30 筆資料繪製圖表)
+            const url = `https://api.thingspeak.com/channels/${channelID}/feeds.json?api_key=${readAPIKey}&results=30`;
 
             try {
                 const response = await fetch(url);
                 const data = await response.json();
 
                 if (data.feeds && data.feeds.length > 0) {
-                    const feed = data.feeds[0];
+                    // 1. 處理最新一筆數據 (陣列最後一個元素)
+                    const latestFeed = data.feeds[data.feeds.length - 1];
+                    const currentTemp = parseFloat(latestFeed.field1).toFixed(1);
+                    const currentHum = parseFloat(latestFeed.field2).toFixed(1);
                     
-                    // 假設 Field 1 為溫度，Field 2 為濕度 (須與您上傳的設定一致)
-                    const temp = parseFloat(feed.field1).toFixed(1);
-                    const hum = parseFloat(feed.field2).toFixed(1);
-                    
-                    // 轉換 UTC 時間為本地時間
-                    const date = new Date(feed.created_at);
+                    const date = new Date(latestFeed.created_at);
                     const timeString = date.toLocaleString('zh-TW');
 
-                    tempEl.innerText = isNaN(temp) ? '--' : temp;
-                    humEl.innerText = isNaN(hum) ? '--' : hum;
+                    tempEl.innerText = isNaN(currentTemp) ? '--' : currentTemp;
+                    humEl.innerText = isNaN(currentHum) ? '--' : currentHum;
                     timeEl.innerText = `最後更新：${timeString}`;
+
+                    // 2. 處理歷史圖表數據陣列
+                    const timeLabels = [];
+                    const tempData = [];
+                    const humData = [];
+
+                    data.feeds.forEach(feed => {
+                        // 將時間轉換為只顯示 時:分，適合手機小螢幕顯示
+                        const dt = new Date(feed.created_at);
+                        const timeLabel = dt.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+                        
+                        timeLabels.push(timeLabel);
+                        tempData.push(parseFloat(feed.field1));
+                        humData.push(parseFloat(feed.field2));
+                    });
+
+                    // 3. 呼叫繪圖函式
+                    renderChart(timeLabels, tempData, humData);
+
                 } else {
                     timeEl.innerText = '尚未有數據上傳';
                 }
             } catch (error) {
                 timeEl.innerText = '網路錯誤或 API 連線失敗';
-                console.error(error);
+                console.error("Fetch Error: ", error);
             }
+        }
+
+        function renderChart(labels, temps, hums) {
+            const ctx = document.getElementById('historyChart').getContext('2d');
+
+            // 若圖表已存在，必須先銷毀，否則新舊圖表會重疊導致觸控失效
+            if (myChart) {
+                myChart.destroy();
+            }
+
+            myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '溫度 (°C)',
+                            data: temps,
+                            borderColor: 'rgba(255, 59, 48, 1)', // iOS 系統紅色
+                            backgroundColor: 'rgba(255, 59, 48, 0.1)',
+                            borderWidth: 2,
+                            pointRadius: 2,
+                            tension: 0.3 // 使線條帶有平滑弧度
+                        },
+                        {
+                            label: '濕度 (%)',
+                            data: hums,
+                            borderColor: 'rgba(0, 122, 255, 1)', // iOS 系統藍色
+                            backgroundColor: 'rgba(0, 122, 255, 0.1)',
+                            borderWidth: 2,
+                            pointRadius: 2,
+                            tension: 0.3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false // 關鍵設定：允許手指點擊線條周圍的垂直區域即可顯示數值，不需精準點擊端點
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'bottom',
+                            labels: {
+                                boxWidth: 12,
+                                font: { size: 12 }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                maxTicksLimit: 6 // 限制 X 軸最多顯示 6 個時間標籤，避免手機螢幕擁擠
+                            },
+                            grid: { display: false }
+                        },
+                        y: {
+                            // 可選：若想讓 Y 軸從 0 開始，取消下方註解
+                            // beginAtZero: true 
+                        }
+                    }
+                }
+            });
         }
 
         // 網頁載入時自動執行一次資料抓取
