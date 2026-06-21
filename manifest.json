@@ -1,0 +1,15 @@
+{
+    "name": "環境溫濕度監測",
+    "short_name": "溫濕度",
+    "start_url": "./index.html",
+    "display": "standalone",
+    "background_color": "#f4f4f7",
+    "theme_color": "#007aff",
+    "icons": [
+      {
+        "src": "icon.png",
+        "sizes": "512x512",
+        "type": "image/png"
+      }
+    ]
+  }

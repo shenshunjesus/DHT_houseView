@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>環境監測</title>
+
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="溫濕度">
+    <link rel="apple-touch-icon" href="icon.png"> <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f4f7;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            width: 100%;
+            max-width: 350px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .value-box {
+            margin: 20px 0;
+        }
+        .label {
+            font-size: 16px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .value {
+            font-size: 48px;
+            font-weight: bold;
+            color: #1c1c1e;
+        }
+        .unit {
+            font-size: 20px;
+            color: #888;
+        }
+        .time {
+            font-size: 12px;
+            color: #999;
+            margin-top: 15px;
+        }
+        button {
+            background-color: #007aff;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 15px 30px;
+            font-size: 16px;
+            font-weight: bold;
+            width: 100%;
+            max-width: 350px;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0, 122, 255, 0.3);
+        }
+        button:active {
+            background-color: #005bb5;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <div class="value-box">
+            <div class="label">目前溫度</div>
+            <span class="value" id="temp">--</span><span class="unit"> °C</span>
+        </div>
+        <hr style="border:0; border-top: 1px solid #eee; margin: 20px 0;">
+        <div class="value-box">
+            <div class="label">目前濕度</div>
+            <span class="value" id="hum">--</span><span class="unit"> %</span>
+        </div>
+        <div class="time" id="update-time">最後更新：讀取中...</div>
+    </div>
+
+    <button onclick="fetchData()">重新整理</button>
+
+    <script>
+        // ---------------- 填寫您的 ThingSpeak 參數 ----------------
+        const channelID = '3413187'; 
+        const readAPIKey = '4SWK1WXMMR02TUZF'; 
+        // ---------------------------------------------------------
+
+        async function fetchData() {
+            const tempEl = document.getElementById('temp');
+            const humEl = document.getElementById('hum');
+            const timeEl = document.getElementById('update-time');
+
+            tempEl.innerText = '..';
+            humEl.innerText = '..';
+            timeEl.innerText = '讀取資料中...';
+
+            // 呼叫 Read API，設定 results=1 只取最新一筆數據
+            const url = `https://api.thingspeak.com/channels/${channelID}/feeds.json?api_key=${readAPIKey}&results=1`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.feeds && data.feeds.length > 0) {
+                    const feed = data.feeds[0];
+                    
+                    // 假設 Field 1 為溫度，Field 2 為濕度 (須與您上傳的設定一致)
+                    const temp = parseFloat(feed.field1).toFixed(1);
+                    const hum = parseFloat(feed.field2).toFixed(1);
+                    
+                    // 轉換 UTC 時間為本地時間
+                    const date = new Date(feed.created_at);
+                    const timeString = date.toLocaleString('zh-TW');
+
+                    tempEl.innerText = isNaN(temp) ? '--' : temp;
+                    humEl.innerText = isNaN(hum) ? '--' : hum;
+                    timeEl.innerText = `最後更新：${timeString}`;
+                } else {
+                    timeEl.innerText = '尚未有數據上傳';
+                }
+            } catch (error) {
+                timeEl.innerText = '網路錯誤或 API 連線失敗';
+                console.error(error);
+            }
+        }
+
+        // 網頁載入時自動執行一次資料抓取
+        window.onload = fetchData;
+    </script>
+</body>
+</html>
